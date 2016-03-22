@@ -1,0 +1,55 @@
+#!bin/python
+#encoding:utf-8
+import time
+import datetime
+import sys
+
+import mysql_api as mysql
+import mongo_util as mongo
+import feed_xpost
+from format_time import format_time
+reload(sys)
+sys.setdefaultencoding('utf-8')
+
+
+def get_mongo_conn():
+    mongo_conn = mongo.connect('192.168.241.12', 'stream')
+    return mongo_conn
+
+def process():
+    mongo_conn = get_mongo_conn()
+    tablename = 'comgeneral'
+    conn_old = mysql.connect('bsppr', '192.168.241.7')
+    mysql.insert(conn_old,'set names utf8')
+    conn_new = mysql.connect('bsppr', '192.168.241.32')
+    mysql.insert(conn_new,'set names utf8')
+    while True:
+	tmpdatas = mongo.find(mongo_conn, tablename, {},10)
+        rawdatas = []
+        for raw in tmpdatas:
+	    url = raw['url']
+            #mongo.delete(mongo_conn, tablename, {'url':url})
+            datestr = raw['pubtime']
+	    if not datestr:
+		continue
+	    updatetime = raw.get('updatetime',time.time)
+	    date = format_time(datestr,updatetime)
+	    now = datetime.datetime.now()
+            diff = now - date
+            if diff.days>2:
+                continue
+            rawdatas.append(raw)
+        if len(rawdatas)==0:
+	    print 'wait datas...'
+            time.sleep(300)
+        old_insert_num = feed_xpost.feed_data_to_xpost(conn_old, raw_old_qualified,'old')
+	print 'old_insert_num: ',old_insert_num
+        new_insert_num = feed_xpost.feed_data_to_xpost(conn_new, raw_new_qualified,'new')
+	print 'new_insert_num: ',new_insert_num
+	break
+        
+if __name__ == '__main__':
+    process()
+        
+        
+    

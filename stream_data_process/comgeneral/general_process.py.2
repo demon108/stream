@@ -1,0 +1,87 @@
+#!bin/python
+#encoding:utf-8
+import threading
+import time
+import datetime
+import sys
+
+import mysql_api as mysql
+import mongo_util as mongo
+import feed_xpost
+from format_time import format_time
+reload(sys) 
+sys.setdefaultencoding('utf-8') 
+ 
+def get_mongo_conn():
+    mongo_conn = mongo.connect('192.168.241.12', 'stream')
+    return mongo_conn
+
+class Feed(threading.Thread):
+    
+    def __init__(self,terrace):
+        threading.Thread.__init__(self)
+        self.terrace = terrace
+            
+    def run(self):
+        if self.terrace=='new':
+            conn = mysql.connect('bsppr', '192.168.241.32')
+        else:
+            conn = mysql.connect('bsppr', '192.168.241.7')
+        mysql.insert(conn,'set names utf8')
+        mongo_conn = get_mongo_conn()
+        tablename = 'comgeneral'
+	try:
+	    total = int(open('total_%s.dat'%(self.terrace),'r').read().strip())
+	    raw_total = int(open('raw_total_%s.dat'%(self.terrace),'r').read().strip())
+	except:
+	    total = 0
+	    raw_total = 0
+        while True:
+            tmpdatas = mongo.find(mongo_conn, tablename, {'terrace':self.terrace},1000)
+	    print '...%s get data ...'%(self.terrace)
+            rawdatas = []
+            for raw in tmpdatas:
+		raw_total += 1
+                url = raw['url']
+                mongo.delete(mongo_conn, tablename, {'url':url})
+                datestr = raw['pubtime']
+                if not datestr:
+                    continue
+                updatetime = raw.get('updatetime',time.time)
+		try:
+                    date = format_time(datestr,updatetime)
+                    #open(self.terrace,'a+').write('%s\n'%str(date))
+                    now = datetime.datetime.now()
+                    diff = now - date
+		except:
+		    open('date_error.dat','a+').write('%s\t%s\n'%(datestr,url))
+		    continue
+                if diff.days>2:
+                    continue
+                raw.update({'pubtime':date})
+                rawdatas.append(raw)
+            if tmpdatas.count()==0:
+                print '%s wait datas...'%(self.terrace)
+                time.sleep(180)
+		continue
+            insert_num = feed_xpost.feed_data_to_xpost(conn, rawdatas,self.terrace)
+	    total += insert_num
+	    
+	    f = open('total_%s.dat'%(self.terrace),'w')
+	    f.write('%s\n'%(total))
+	    f.flush()
+	    fr = open('raw_total_%s.dat'%(self.terrace),'w')
+	    fr.write('%s\n'%(raw_total))
+	    fr.flush()
+            #break
+
+def process():
+    feed_new = Feed('new')
+    feed_old = Feed('old')
+    feed_new.start()
+    time.sleep(3)
+    feed_old.start()
+
+if __name__ == '__main__':
+    process()
+
